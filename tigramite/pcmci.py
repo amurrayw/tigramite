@@ -8,6 +8,8 @@ from __future__ import print_function
 import itertools
 from collections import defaultdict
 from copy import deepcopy
+from scipy import stats
+from tigramite.independence_tests import GPDC, CMIknn
 import numpy as np
 
 def _create_nested_dictionary(depth=0, lowest_type=dict):
@@ -1460,7 +1462,101 @@ class PCMCI():
                         conf_matrix[p[0], j, abs(p[1])][1])
             print(string)
 
-    def print_results(self, 
+    ## TODO: should alter (or add as flag/call-in?) run_mci (copied here) so that it runs on contemp. effects.
+    def run_contemp_mci(self,
+                selected_links=None,
+                tau_min=0,
+                tau_max=1,
+                parents=None,
+                max_conds_py=None,
+                max_conds_px=None):
+        """MCI conditional independence tests.
+
+        Implements the MCI test (Algorithm 2 in [1]_). Returns the matrices of
+        test statistic values,  p-values, and confidence intervals.
+
+        Parameters
+        ----------
+        selected_links : dict or None
+            Dictionary of form {0:all_parents (3, -2), ...], 1:[], ...}
+            specifying whether only selected links should be tested. If None is
+            passed, all links are tested
+        tau_min : int, default: 0
+            Minimum time lag to test. Note that zero-lags are undirected.
+        tau_max : int, default: 1
+            Maximum time lag. Must be larger or equal to tau_min.
+        parents : dict or None
+            Dictionary of form {0:[(0, -1), (3, -2), ...], 1:[], ...}
+            specifying the conditions for each variable. If None is
+            passed, no conditions are used.
+        max_conds_py : int or None
+            Maximum number of conditions of Y to use. If None is passed, this
+            number is unrestricted.
+        max_conds_px : int or None
+            Maximum number of conditions of Z to use. If None is passed, this
+            number is unrestricted.
+
+        Returns
+        -------
+        results : dictionary of arrays of shape [N, N, tau_max+1]
+            {'val_matrix':val_matrix, 'p_matrix':p_matrix} are always returned
+            and optionally conf_matrix which is of shape [N, N, tau_max+1,2]
+        """
+        # Check the limits on tau
+        self._check_tau_limits(tau_min, tau_max)
+        # Set the selected links
+        _int_sel_links = self._set_sel_links(selected_links, tau_min, tau_max)
+        # Print information about the input parameters
+        if self.verbosity > 0:
+            self._print_mci_parameters(tau_min, tau_max,
+                                       max_conds_py, max_conds_px)
+
+        # Set the maximum condition dimension for Y and X
+        max_conds_py = self._set_max_condition_dim(max_conds_py,
+                                                   tau_min, tau_max)
+        max_conds_px = self._set_max_condition_dim(max_conds_px,
+                                                   tau_min, tau_max)
+        # Get the parents that will be checked
+        _int_parents = self._get_int_parents(parents)
+        # Initialize the return values
+        val_matrix = np.zeros((self.N, self.N, tau_max + 1))
+        p_matrix = np.ones((self.N, self.N, tau_max + 1))
+        # Initialize the optional return of the confidance matrix
+        conf_matrix = None
+        if self.cond_ind_test.confidence is not False:
+            conf_matrix = np.zeros((self.N, self.N, tau_max + 1, 2))
+
+        # Get the conditions as implied by the input arguments
+        for j, i, tau, Z in self._iter_indep_conds(_int_parents,
+                                                   self.selected_variables,
+                                                   _int_sel_links,
+                                                   max_conds_py,
+                                                   max_conds_px):
+            # Set X and Y (for clarity of code)
+            X = [(i, tau)]
+            Y = [(j, 0)]
+            # Run the independence tests and record the results
+            val, pval = self.cond_ind_test.run_test(X, Y, Z=Z, tau_max=tau_max)
+            val_matrix[i, j, abs(tau)] = val
+            p_matrix[i, j, abs(tau)] = pval
+            # Get the confidance value, returns None if cond_ind_test.confidance
+            # is False
+            conf = self.cond_ind_test.get_confidence(X, Y, Z=Z, tau_max=tau_max)
+            # Record the value if the conditional independence requires it
+            if self.cond_ind_test.confidence:
+                conf_matrix[i, j, abs(tau)] = conf
+            # Print the results if needed
+            if self.verbosity > 1:
+                self.cond_ind_test._print_cond_ind_results(val,
+                                                           pval=pval,
+                                                           conf=conf)
+        # Return the values as a dictionary
+        return {'val_matrix':val_matrix,
+                'p_matrix':p_matrix,
+                'conf_matrix':conf_matrix}
+        return
+
+    def print_results(self,
                       return_dict, 
                       alpha_level=0.05):
         """Prints significant parents from output of MCI or PCMCI algorithms.
@@ -1495,109 +1591,713 @@ class PCMCI():
                                      q_matrix=q_matrix,
                                      alpha_level=alpha_level)
 
-    def run_pcmci(self,
-                  selected_links=None,
-                  tau_min=0,
-                  tau_max=1,
-                  save_iterations=False,
-                  pc_alpha=0.05,
-                  max_conds_dim=None,
-                  max_combinations=1,
-                  max_conds_py=None,
-                  max_conds_px=None,
-                  fdr_method='none'):
-        """Run full PCMCI causal discovery for time series datasets.
+        ## TODO: Modify runpcmci so that it has a flag to run  runcontempmci.
+        def run_pcmci(self,
+                      selected_links=None,
+                      tau_min=0,
+                      tau_max=1,
+                      save_iterations=False,
+                      pc_alpha=0.05,
+                      pc_alpha_contemp=.05,
+                      max_conds_dim=None,
+                      max_combinations=1,
+                      max_conds_py=None,
+                      max_conds_px=None,
+                      test_contemp=False,
+                      fdr_method='none'):
+            """Run full PCMCI causal discovery for time series datasets.
 
-        Wrapper around PC-algorithm function and MCI function.
+            Wrapper around PC-algorithm function and MCI function.
 
-        Parameters
-        ----------
-        selected_links : dict or None
-            Dictionary of form {0:all_parents (3, -2), ...], 1:[], ...}
-            specifying whether only selected links should be tested. If None is
-            passed, all links are tested
+            Parameters
+            ----------
+            selected_links : dict or None
+                Dictionary of form {0:all_parents (3, -2), ...], 1:[], ...}
+                specifying whether only selected links should be tested. If None is
+                passed, all links are tested
 
-        tau_min : int, optional (default: 0)
-          Minimum time lag to test. Note that zero-lags are undirected.
+            tau_min : int, optional (default: 0)
+              Minimum time lag to test. Note that zero-lags are undirected.
 
-        tau_max : int, optional (default: 1)
-          Maximum time lag. Must be larger or equal to tau_min.
+            tau_max : int, optional (default: 1)
+              Maximum time lag. Must be larger or equal to tau_min.
 
-        save_iterations : bool, optional (default: False)
-          Whether to save iteration step results such as conditions used.
+            save_iterations : bool, optional (default: False)
+              Whether to save iteration step results such as conditions used.
 
-        pc_alpha : float, optional (default: 0.05)
-          Significance level in algorithm.
+            pc_alpha : float, optional (default: 0.05)
+              Significance level in algorithm.
 
-        max_conds_dim : int, optional (default: None)
-          Maximum number of conditions to test. If None is passed, this number
-          is unrestricted.
+            pc_alpha_contemp : float, optional (default: 0.05)
+              Significance level in contemp version of algorithm.
 
-        max_combinations : int, optional (default: 1)
-          Maximum number of combinations of conditions of current cardinality
-          to test. Defaults to 1 for PC_1 algorithm. For original PC algorithm
-          a larger number, such as 10, can be used.
+            max_conds_dim : int, optional (default: None)
+              Maximum number of conditions to test. If None is passed, this number
+              is unrestricted.
 
-        max_conds_py : int, optional (default: None)
-            Maximum number of conditions of Y to use. If None is passed, this
-            number is unrestricted.
+            max_combinations : int, optional (default: 1)
+              Maximum number of combinations of conditions of current cardinality
+              to test. Defaults to 1 for PC_1 algorithm. For original PC algorithm
+              a larger number, such as 10, can be used.
 
-        max_conds_px : int, optional (default: None)
-            Maximum number of conditions of Z to use. If None is passed, this
-            number is unrestricted.
+            max_conds_py : int, optional (default: None)
+                Maximum number of conditions of Y to use. If None is passed, this
+                number is unrestricted.
 
-        fdr_method : str, optional (default: 'none')
-            Correction method, default is Benjamini-Hochberg False Discovery
-            Rate method.
+            max_conds_px : int, optional (default: None)
+                Maximum number of conditions of Z to use. If None is passed, this
+                number is unrestricted.
 
-        Returns
-        -------
-        results : dictionary of arrays of shape [N, N, tau_max+1]
-            {'val_matrix':val_matrix, 'p_matrix':p_matrix} are always returned
-            and optionally q_matrix and conf_matrix which is of shape
-            [N, N, tau_max+1,2]
-        """
-        # Get the parents from run_pc_stable
-        all_parents = self.run_pc_stable(selected_links=selected_links,
-                                         tau_min=tau_min,
-                                         tau_max=tau_max,
-                                         save_iterations=save_iterations,
-                                         pc_alpha=pc_alpha,
-                                         max_conds_dim=max_conds_dim,
-                                         max_combinations=max_combinations)
-        # Get the results from run_mci, using the parents as the input
-        results = self.run_mci(selected_links=selected_links,
-                               tau_min=tau_min,
-                               tau_max=tau_max,
-                               parents=all_parents,
-                               max_conds_py=max_conds_py,
-                               max_conds_px=max_conds_px)
-        # Get the values and p-values
-        val_matrix = results['val_matrix']
-        p_matrix = results['p_matrix']
-        # Initialize and fill the the confidance matrix if the confidance test
-        # says it should be returned
+            fdr_method : str, optional (default: 'none')
+                Correction method, default is Benjamini-Hochberg False Discovery
+                Rate method.
 
-        conf_matrix = None
-        if self.cond_ind_test.confidence is not False:
-            conf_matrix = results['conf_matrix']
-        # Initialize and fill the q_matrix if there is a fdr_method
-        q_matrix = None
-        if fdr_method != 'none':
-            q_matrix = self.get_corrected_pvalues(p_matrix,
-                                                  fdr_method=fdr_method)
-        # Store the parents in the pcmci member
-        self.all_parents = all_parents
-        # Cache the resulting values in the return dictionary
-        return_dict = {'val_matrix': val_matrix,
-                       'p_matrix': p_matrix,
-                       'q_matrix': q_matrix,
-                       'conf_matrix': conf_matrix}
-        # Print the information
-        if self.verbosity > 0:
-            self.print_results(return_dict)
-        # Return the dictionary
-        return return_dict
+            Returns
+            -------
+            results : dictionary of arrays of shape [N, N, tau_max+1]
+                {'val_matrix':val_matrix, 'p_matrix':p_matrix} are always returned
+                and optionally q_matrix and conf_matrix which is of shape
+                [N, N, tau_max+1,2]
+            """
+            # Get the parents from run_pc_stable
+            all_parents = self.run_pc_stable(selected_links=selected_links,
+                                             tau_min=tau_min,
+                                             tau_max=tau_max,
+                                             save_iterations=save_iterations,
+                                             pc_alpha=pc_alpha,
+                                             max_conds_dim=max_conds_dim,
+                                             max_combinations=max_combinations)
+            if test_contemp:
+                results = self.run_contemp_mci(selected_links=selected_links,
+                                               tau_min=tau_min,
+                                               tau_max=tau_max,
+                                               parents=all_parents,
+                                               max_conds_py=max_conds_py,
+                                               max_conds_px=max_conds_px)
+                ## TODO: Need to pass knowledge (adj.mat) here. ALso data,
+                pcalg_skeleton(X=self.dataframe, knowledge=(results['p_matrix'] < pc_alpha) + 0,
+                               sig_level=pc_alpha_contemp,
+                               pmax=100,
+                               qmax=100,
+                               ci_test='par_corr',
+                               verbosity=0)
+            else:
+                # Get the results from run_mci, using the parents as the input
+                results = self.run_mci(selected_links=selected_links,
+                                       tau_min=tau_min,
+                                       tau_max=tau_max,
+                                       parents=all_parents,
+                                       max_conds_py=max_conds_py,
+                                       max_conds_px=max_conds_px)
+            # Get the values and p-values
+            val_matrix = results['val_matrix']
+            p_matrix = results['p_matrix']
+            # Initialize and fill the the confidance matrix if the confidance test
+            # says it should be returned
+
+            conf_matrix = None
+            if self.cond_ind_test.confidence is not False:
+                conf_matrix = results['conf_matrix']
+            # Initialize and fill the q_matrix if there is a fdr_method
+            q_matrix = None
+            if fdr_method != 'none':
+                q_matrix = self.get_corrected_pvalues(p_matrix,
+                                                      fdr_method=fdr_method)
+            # Store the parents in the pcmci member
+            self.all_parents = all_parents
+            # Cache the resulting values in the return dictionary
+            return_dict = {'val_matrix': val_matrix,
+                           'p_matrix': p_matrix,
+                           'q_matrix': q_matrix,
+                           'conf_matrix': conf_matrix}
+            # Print the information
+            if self.verbosity > 0:
+                self.print_results(return_dict)
+            # Return the dictionary
+            return return_dict
+
+
+## TODO: Should try modifying this one, as it doesn't seem to be used,
+## and could perhaps easily take outputed time series graph as input?
+def pcalg_skeleton(X, knowledge, sig_level=0.1, pmax=100, qmax=100,
+                   ci_test='par_corr',
+                   verbosity=0):
+    N = X.shape[1]
+
+    # Form complete graph
+    #    graph = np.ones((N, N), dtype='int')
+    #   graph[range(N),range(N)] = 0
+
+    ## Use prior knowledge as the starting graph.
+    graph = knowledge
+    # Define adj
+    adj = get_adj(graph)
+
+    # Define sepset
+    sepset = dict([((i, j), []) for i in range(N) for j in range(N)])
+
+    p = 0
+    # print [len(adj[j]) for j in range(N)]
+    if verbosity > 0:
+        print(graph)
+
+    while (np.any([len(adj[j]) - 1 >= p for j in range(N)]) and p <= pmax):
+        if verbosity > 0:
+            print("\n:::::::::::::::::::::::: p = %d" % p)
+
+        # Store already computed CI test results
+        ci_results = {}
+        print("graph")
+        print(graph)
+        print("graph.shape")
+        print(graph.shape)
+        print("zip(*np.where(graph))")
+        print(zip(*np.where(graph)))
+        for (i, j) in zip(*np.where(graph)):
+            # for (i, j) in itertools.combinations(range(N), 2):
+            # for j in range(N):
+            if graph[i, j] != 0 and len(adj[j]) - 1 >= p:
+                if verbosity > 0:
+                    print("\n\t%d -- %d" % (i, j))
+
+                conditions = list(itertools.combinations([l for l in adj[j] if l != i], p))
+                if verbosity > 0:
+                    print("\tIterate through conditions %s" % conditions)
+                for q, S in enumerate(conditions):
+                    if q > qmax:
+                        break
+
+                    check = is_in_set(i, j, S, ci_results)
+                    if type(check) != bool:
+                        pval = check
+                    else:
+                        pval = CI(X, i, j, S, ci_test)[0]
+
+                    if verbosity > 0:
+                        print("\t\t%d _|_ %d | %s : pval=%.4f %s  %s" % (
+                        i, j, S, pval, {0: '<= %s: dep' % sig_level, 1: '> %s: indep' % sig_level}[pval > sig_level],
+                        {False: '[recycled]', True: ''}[type(check) == bool]))
+                    if pval > sig_level:
+                        graph[i, j] = graph[j, i] = 0
+                        sepset[(i, j)] = sepset[(j, i)] = list(S)
+                        break
+                    else:
+                        ci_results[((i, j), S)] = pval
+
+        if verbosity > 0:
+            print("\nUpdated graph")
+            print(graph)
+        # print sepset
+
+        # Increase condition cardinality
+        p += 1
+
+        # Re-compute adj
+        adj = get_adj(graph)
+        # dict([(j, list(np.where(graph[:,j] != 0)[0])) for j in range(N)])
+        # print "updated ", adj
+    return {'graph': graph,
+            'sepset': sepset}
+
+
+def pcalg_skeleton_timeseries(X, sig_level=0.1,
+                              tau_min=0, tau_max=1,
+                              pmax=100, qmax=100,
+                              ci_test='par_corr',
+                              verbosity=0):
+    N = X.shape[1]
+
+    # Form complete graph
+    graph = np.ones((N, N, tau_max + 1), dtype='int')
+    graph[range(N), range(N), 0] = 0
+
+    # Define adj
+    adjt = get_adj_time_series(graph)
+    # print adjt
+    # Define sepset
+    sepset = dict([(((i, -tau), j), []) for tau in range(tau_max + 1) for i in range(N) for j in range(N)])
+
+    if verbosity > 0:
+        print("\n--------------------------")
+        print("Skeleton discovery phase")
+        print("--------------------------")
+
+    p = 0
+    # print [len(adj[j]) for j in range(N)]
+    # if verbosity > 0:
+    #     print (graph)
+
+    while (np.any([len(adjt[j]) - 1 >= p for j in range(N)]) and p <= pmax):
+        if verbosity > 0:
+            print("\n:::::::::::::::::::::::: p = %d" % p)
+
+        # Store already computed CI test results
+        ci_results = {}
+        for (i, j, abstau) in zip(*np.where(graph)):
+            if graph[i, j, abstau] != 0 and len(adjt[j]) - 1 >= p:
+                if verbosity > 0:
+                    print("\n\t(%d, %d) o--o %d" % (i, -abstau, j))
+
+                conditions = list(itertools.combinations([(k, tauk) for (k, tauk) in adjt[j]
+                                                          if not (k == i and tauk == -abstau)], p))
+                if verbosity > 0:
+                    print("\tIterate through conditions %s" % conditions)
+
+                for q, S in enumerate(conditions):
+                    if q > qmax:
+                        break
+
+                    check = is_in_set_timeseries(i, abstau, j, S, ci_results)
+                    if type(check) != bool:
+                        pval = check
+                    else:
+                        pval = CI_timeseries(X, i, abstau, j, S, ci_test)[0]
+
+                    if verbosity > 0:
+                        print("\t\t(%d, %d) _|_ %d | %s : pval=%.4f %s  %s" % (i, -abstau, j, S, pval,
+                                                                               {0: '<= %s: dep' % sig_level,
+                                                                                1: '> %s: indep' % sig_level}[
+                                                                                   pval > sig_level],
+                                                                               {False: '[recycled]', True: ''}[
+                                                                                   type(check) == bool]))
+                    if pval > sig_level:
+                        if abstau == 0:
+                            graph[i, j, 0] = graph[j, i, 0] = 0
+                            sepset[((i, 0), j)] = sepset[((j, 0), i)] = list(S)
+                        else:
+                            graph[i, j, abstau] = 0
+                            sepset[((i, -abstau), j)] = list(S)
+                        break
+                    else:
+                        ci_results[(((i, -abstau), j), S)] = pval
+
+        # Increase condition cardinality
+        p += 1
+
+        # Re-compute adj
+        adjt = get_adj_time_series(graph)
+        # dict([(j, list(np.where(graph[:,j] != 0)[0])) for j in range(N)])
+        # print "updated ", adjt
+        if verbosity > 0:
+            print("\nUpdated adjacencies")
+            print(adjt)
+
+    return {'graph': graph,
+            'sepset': sepset}
+
+
+def get_adj(graph):
+    N = len(graph)
+    return dict([(j, list(np.where(graph[:, j] != 0)[0])) for j in range(N)])
+
+
+def get_adj_time_series(graph):
+    N, N, tau_max_plusone = graph.shape
+    adjt = {}
+    for j in range(N):
+        where = np.where(graph[:, j, :] != 0)
+        adjt[j] = list(zip(*(where[0], -where[1])))
+
+    return adjt
+
+
+def get_adj_time_series_contemp(graph):
+    N, N, tau_max_plusone = graph.shape
+    adjt = {}
+    for j in range(N):
+        adjt[j] = list(np.where(graph[:, j, 0] != 0)[0])
+
+    return adjt
+
+
+def pcalg_colliders(graph, sepset, verbosity=0):
+    N = graph.shape[0]
+
+    # Check symmetry
+    if not np.all(graph == graph.transpose()):
+        raise ValueError("Graph not symmetric")
+
+    adj = get_adj(graph)
+
+    # Find unshielded triples
+    triples = []
+    for i in range(N):
+        for k in adj[i]:
+            for j in adj[k]:
+                if j > i and i != k and k != j:
+                    if graph[i, j] == 0 and graph[j, i] == 0:
+                        triples.append((i, k, j))
+
+    for ikj in triples:
+        i, k, j = ikj
+        # print "triples ", ikj, sepset[(i,j)]
+        if k not in sepset[(i, j)]:
+            # print 'not in sep'
+            graph[k, i] = 0
+            graph[k, j] = 0
+
+    if verbosity > 0:
+        print("Updated graph")
+        print(graph)
+
+    return {'graph': graph,
+            'sepset': sepset}
+
+
+def pcalg_colliders_timeseries(graph, sepset, verbosity=0):
+    N = graph.shape[0]
+
+    if verbosity > 0:
+        print("\n----------------------------")
+        print("Collider orientation phase")
+        print("----------------------------")
+
+    # Check symmetry
+    if not np.all(graph[:, :, 0] == graph[:, :, 0].transpose()):
+        raise ValueError("Graph not symmetric")
+
+    adjt = get_adj_time_series(graph)
+
+    # Find unshielded triples
+    triples = []
+    for j in range(N):
+        for (k, tauk) in adjt[j]:
+            if tauk == 0:
+                for (i, taui) in adjt[k]:
+                    if not (k == j or (taui == 0 and (i == k or i == j))):
+                        if ((taui == 0 and graph[i, j, 0] == 0 and graph[j, i, 0] == 0)
+                                or taui < 0 and graph[i, j, abs(taui)] == 0):
+                            triples.append(((i, taui), k, j))
+
+    for itaukj in triples:
+        print(itaukj)
+        (i, tau), k, j = itaukj
+        if (k, 0) not in sepset[((i, tau), j)]:
+            print("(%d, 0) not in sepset, Remove %d --> %d " % (k, k, j))
+            graph[k, j, 0] = 0
+            if tau == 0:
+                print("tau=0, Remove %d --> %d " % (k, i))
+                graph[k, i, 0] = 0
+
+    if verbosity > 0:
+        adjt = get_adj_time_series(graph)
+        print("\nUpdated adjacencies")
+        print(adjt)
+
+    return {'graph': graph,
+            'sepset': sepset}
+
+
+def pcalg_rules(graph, sepset, verbosity=0):
+    N = graph.shape[0]
+
+    # adj = get_adj(graph)
+
+    def rule1(graph):
+        # Find triples i --> k -- j with i -/- j
+        adj = get_adj(graph)
+        triples = []
+        for k in range(N):
+            for i in adj[k]:
+                if k not in adj[i]:
+                    for j in adj[k]:
+                        if k in adj[j]:
+                            if graph[i, j] == 0 and graph[j, i] == 0:
+                                triples.append((i, k, j))
+
+        # orient as i --> k --> j
+        for ikj in triples:
+            i, k, j = ikj
+            graph[j, k] = 0
+
+        return len(triples) > 0, graph
+
+    def rule2(graph):
+        # Find triples i --> k --> j with i -- j
+        adj = get_adj(graph)
+        triples = []
+        for j in range(N):
+            for k in adj[j]:
+                if j not in adj[k]:
+                    for i in adj[k]:
+                        if k not in adj[i]:
+                            if graph[i, j] == 1 and graph[j, i] == 1:
+                                triples.append((i, k, j))
+
+        # orient as i --> j
+        for ikj in triples:
+            i, k, j = ikj
+            graph[j, i] = 0
+
+        return len(triples) > 0, graph
+
+    def rule3(graph):
+        # Find chains i -- k --> j and  i -- l --> j with i -- j
+        # and k -/- l
+        adj = get_adj(graph)
+        pairs = []
+        for j in range(N):
+            for i in adj[j]:
+                if graph[j, i] == 1:
+                    for k in adj[j]:
+                        for l in adj[j]:
+                            if (k != l and k != i and l != i and j not in adj[k] and j not in adj[l]
+                                    and graph[k, l] == 0 and graph[l, k] == 0):
+                                if i in adj[l] and i in adj[k]:
+                                    if graph[k, i] == 1 and graph[l, i] == 1:
+                                        pairs.append((i, j))
+
+        # orient as i --> j
+        for ij in pairs:
+            # print ij
+            i, j = ij
+            graph[j, i] = 0
+
+        return len(pairs) > 0, graph
+
+    graph_new = np.copy(graph)
+    any1 = any2 = any3 = True
+    while (any1 or any2 or any3):
+        any1, graph_new = rule1(graph_new)
+        any2, graph_new = rule2(graph_new)
+        any3, graph_new = rule3(graph_new)
+
+    if verbosity > 0:
+        print("Updated graph")
+        print(graph_new)
+
+    return {'graph': graph_new,
+            'sepset': sepset}
+
+
+def pcalg_rules_timeseries(graph, sepset, verbosity=0):
+    N = graph.shape[0]
+
+    def rule1(graph):
+
+        adjt = get_adj_time_series(graph)
+
+        # Find triples i_tau --> k_t -- j_t with i_tau -/- j_t
+        # Orient as i_tau --> k_t --> j_t
+        triples = []
+        for j in range(N):
+            for (k, tauk) in adjt[j]:
+                if tauk == 0 and graph[j, k, 0]:
+                    for (i, taui) in adjt[k]:
+                        if not (k == j or (taui == 0 and (i == k or i == j))):
+                            if ((taui == 0 and graph[i, j, 0] == 0
+                                 and graph[j, i, 0] == 0
+                                 and graph[k, i, 0] == 0)
+                                    or taui < 0 and graph[i, j, abs(taui)] == 0):
+                                triples.append(((i, taui), k, j))
+
+        for itaukj in triples:
+            (i, tau), k, j = itaukj
+            print("Found triple %s, Removing (%d, 0) --> %d" % (itaukj, j, k))
+            graph[j, k, 0] = 0
+
+        return len(triples) > 0, graph
+
+    def rule2(graph):
+
+        # Find triples i_t --> k_t --> j_t with i_t -- j_t
+        # Orient as i_t --> j_t
+        adjtcont = get_adj_time_series_contemp(graph)
+
+        triples = []
+        for j in range(N):
+            for k in adjtcont[j]:
+                if j not in adjtcont[k]:
+                    for i in adjtcont[k]:
+                        if k not in adjtcont[i]:
+                            if graph[i, j, 0] == 1 and graph[j, i, 0] == 1:
+                                triples.append((i, k, j))
+
+        # orient as i --> j
+        for ikj in triples:
+            i, k, j = ikj
+            graph[j, i, 0] = 0
+
+        return len(triples) > 0, graph
+
+    def rule3(graph):
+        # Find chains i_t -- k_tauk --> j_t and  i_t -- l_taul --> j_t with i_t -- j_t
+        # and k_tauk -/- l_taul
+        # Orient as i_t --> j_t
+        adjt = get_adj_time_series(graph)
+
+        pairs = []
+        for j in range(N):
+            for (i, taui) in adjt[j]:
+                if taui == 0 and graph[j, i, 0] == 1:
+                    for (k, tauk) in adjt[j]:
+                        for (l, taul) in adjt[j]:
+                            # Nodes should not be identical
+                            if not ((k == l and tauk == taul)
+                                    or (k == i and tauk == taui)
+                                    or (l == i and taul == taui)):
+                                # There should be an arrowhead from k and l to j
+                                if (j, 0) not in adjt[k] and (j, 0) not in adjt[l]:
+                                    # Check that i is adjacent to k and l
+                                    if (k, tauk) in adjt[i] and (l, taul) in adjt[i]:
+                                        # Check that not both have arrow towards i
+                                        if (i, 0) in adjt[k] or (i, 0) in adjt[l]:
+                                            # k and l should not be adjacent
+                                            if ((taul < tauk and graph[l, k, abs(taul) - abs(tauk)] == 0)
+                                                    or (taul > tauk and graph[k, l, abs(tauk) - abs(taul)] == 0)
+                                                    or (taul == tauk and graph[k, l, 0] == 0 and graph[l, k, 0] == 0)
+                                            ):
+                                                pairs.append((i, j))
+
+                                                # orient as i --> j
+        for ij in pairs:
+            # print ij
+            i, j = ij
+            graph[j, i, 0] = 0
+
+        return len(pairs) > 0, graph
+
+    if verbosity > 0:
+        print("\n----------------------------")
+        print("Rule orientation phase")
+        print("----------------------------")
+
+    graph_new = np.copy(graph)
+    any1 = any2 = any3 = True
+    while (any1 or any2 or any3):
+        if verbosity > 0:
+            print("Apply rule(s) %s" % (np.where(np.array([any1, any2, any3]))))
+        any1, graph_new = rule1(graph_new)
+        any2, graph_new = rule2(graph_new)
+        any3, graph_new = rule3(graph_new)
+
+    if verbosity > 0:
+        adjt = get_adj_time_series(graph_new)
+        print("\nUpdated adjacencies")
+        print(adjt)
+
+    return {'graph': graph_new,
+            'sepset': sepset}
+
+
+def skeleton(graph):
+    skele = np.copy(graph + graph.transpose())
+    return (skele > 0).astype('bool').astype('int')
+
+
+def is_in_set(i, j, S, pval_list):
+    for ijS in pval_list.keys():
+        if set([i, j]) == set(ijS[0]) and set(S) == set(ijS[1]):
+            return pval_list[ijS]
+
+    return False
+
+
+def is_in_set_timeseries(i, abstau, j, S, pval_list):
+    if abstau == 0:
+        for itaujS in pval_list.keys():
+            (((i_stored, tau_stored), j_stored), S_stored) = itaujS
+            if tau_stored == 0:
+                # print i, j, S, ijS, set([i, j]) == set(ijS[0]), set(S) == set(ijS[1])
+                if set([i, j]) == set([i_stored, j_stored]) and set(S) == set(S_stored):
+                    return pval_list[itaujS]
+
+    return False
+
+
+def CI(data, i, j, S, test='par_corr'):
+    if len(S) > 0:
+        z = data[:, S]
+    else:
+        z = None
+
+    x = data[:, i]
+    y = data[:, j]
+
+    if test == 'par_corr':
+        df = len(x) - 2
+        # print z.shape, len(z)
+        if z is not None and z.shape[1] > 0:
+            assert np.ndim(z) > 1
+            df -= z.shape[1]
+            beta_hat_x = np.linalg.lstsq(z, x, rcond=None)[0]
+            xresid = x - np.dot(z, beta_hat_x)
+            beta_hat_y = np.linalg.lstsq(z, y, rcond=None)[0]
+            yresid = y - np.dot(z, beta_hat_y)
+        else:
+            xresid = x
+            yresid = y
+
+        value = np.corrcoef(xresid, yresid)[0, 1]
+
+        # Two-sided significance level
+        trafo_val = value * np.sqrt(df / (1. - value ** 2))
+        pval = stats.t.sf(np.abs(trafo_val), df) * 2
+
+    elif test == 'gpdc':
+        cond_ind_test = GPDC()
+        n = len(x)
+        if z is not None and z.shape[1] > 0:
+            array = np.hstack((x.reshape(n, 1), y.reshape(n, 1),
+                               z)).T
+            xyz = np.array([0, 1, ] + [2 for i in range(z.shape[1])])
+        else:
+            array = np.vstack((x, y))
+            xyz = np.array([0, 1])
+
+        dim, n = array.shape
+        value = cond_ind_test.get_dependence_measure(array, xyz)
+        pval = cond_ind_test.get_analytic_significance(value, n, dim)
+
+    elif test == 'cmi_knn':
+        cond_ind_test = CMIknn()
+        n = len(x)
+        if z is not None and z.shape[1] > 0:
+            array = np.hstack((x.reshape(n, 1), y.reshape(n, 1),
+                               z)).T
+            xyz = np.array([0, 1, ] + [2 for i in range(z.shape[1])])
+        else:
+            array = np.vstack((x, y))
+            xyz = np.array([0, 1])
+
+        dim, n = array.shape
+
+        value = cond_ind_test.get_dependence_measure(array, xyz)
+        pval = cond_ind_test.get_shuffle_significance(array, xyz, value)
+
+    return pval, value
+
+
+def CI_timeseries(data, i, abstau, j, S, test='par_corr'):
+
+    X = [(i, -abstau)]
+    Y = [(j, 0)]
+    Z = list(S)
+
+    maxlag = abstau
+    for cond in S:
+        # print cond
+        maxlag = max(maxlag, abs(cond[1]))
+
+    dataframe = pp.DataFrame(data)
+
+    # Here tau_max = maxlag, which is not good since then
+    # the samplesize is different for different conditioning
+    # sets
+    array, xyz = dataframe.construct_array(X, Y, Z, maxlag,
+                        mask=None,
+                        mask_type=None,
+                        return_cleaned_xyz=False,
+                        do_checks=True,
+                        cut_off='2xtau_max',
+                        verbosity=0)
+
+    i_here = 0
+    j_here = 1
+    S_here = list(np.where(xyz==2)[0])
+
+    return CI(array.T, i_here, j_here, S_here, test=test)
+
 
 if __name__ == '__main__':
     from tigramite.independence_tests import ParCorr
