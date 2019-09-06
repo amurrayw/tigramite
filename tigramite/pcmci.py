@@ -1675,12 +1675,16 @@ class PCMCI():
                                                max_conds_py=max_conds_py,
                                                max_conds_px=max_conds_px)
                 ## TODO: Need to pass knowledge (adj.mat) here. ALso data,
-                pcalg_skeleton(X=self.dataframe, knowledge=(results['p_matrix'] < pc_alpha) + 0,
+                pc_results = pcalg_skeleton(X=self.dataframe, knowledge=(results['p_matrix'] < pc_alpha) + 0,
                                sig_level=pc_alpha_contemp,
                                pmax=100,
                                qmax=100,
                                ci_test='par_corr',
                                verbosity=0)
+
+                return_dict = { 'graph': pc_results['graph'],
+                                'sepset': pc_results['sepset']}
+
             else:
                 # Get the results from run_mci, using the parents as the input
                 results = self.run_mci(selected_links=selected_links,
@@ -1689,27 +1693,27 @@ class PCMCI():
                                        parents=all_parents,
                                        max_conds_py=max_conds_py,
                                        max_conds_px=max_conds_px)
-            # Get the values and p-values
-            val_matrix = results['val_matrix']
-            p_matrix = results['p_matrix']
-            # Initialize and fill the the confidance matrix if the confidance test
-            # says it should be returned
+                # Get the values and p-values
+                val_matrix = results['val_matrix']
+                p_matrix = results['p_matrix']
+                # Initialize and fill the the confidance matrix if the confidance test
+                # says it should be returned
 
-            conf_matrix = None
-            if self.cond_ind_test.confidence is not False:
-                conf_matrix = results['conf_matrix']
-            # Initialize and fill the q_matrix if there is a fdr_method
-            q_matrix = None
-            if fdr_method != 'none':
-                q_matrix = self.get_corrected_pvalues(p_matrix,
-                                                      fdr_method=fdr_method)
-            # Store the parents in the pcmci member
-            self.all_parents = all_parents
-            # Cache the resulting values in the return dictionary
-            return_dict = {'val_matrix': val_matrix,
-                           'p_matrix': p_matrix,
-                           'q_matrix': q_matrix,
-                           'conf_matrix': conf_matrix}
+                conf_matrix = None
+                if self.cond_ind_test.confidence is not False:
+                    conf_matrix = results['conf_matrix']
+                # Initialize and fill the q_matrix if there is a fdr_method
+                q_matrix = None
+                if fdr_method != 'none':
+                    q_matrix = self.get_corrected_pvalues(p_matrix,
+                                                          fdr_method=fdr_method)
+                # Store the parents in the pcmci member
+                self.all_parents = all_parents
+                # Cache the resulting values in the return dictionary
+                return_dict = {'val_matrix': val_matrix,
+                               'p_matrix': p_matrix,
+                               'q_matrix': q_matrix,
+                               'conf_matrix': conf_matrix}
             # Print the information
             if self.verbosity > 0:
                 self.print_results(return_dict)
