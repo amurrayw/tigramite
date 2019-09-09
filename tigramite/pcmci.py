@@ -2123,19 +2123,21 @@ class PCMCI():
                                            tau_max=tau_max,
                                            parents=all_parents,
                                            max_conds_py=max_conds_py,
-                                           max_conds_px=max_conds_px)
+                                           max_conds_px=max_conds_px,
+                                           pc_alpha=pc_alpha,
+                                           pc_alpha_contemp=pc_alpha_contemp)
 
             print(self.dataframe)
             ## TODO: Need to pass knowledge (adj.mat) here. ALso data, -- change to use functional style instead of OO.
-            pc_results = self.pcalg_skeleton(X=dataframe.values, knowledge=((results['p_matrix'] < pc_alpha) + 0),
-                                             sig_level=pc_alpha_contemp,
-                                             pmax=100,
-                                             qmax=100,
-                                             ci_test='par_corr',
-                                             verbosity=0)
+            # pc_results = self.pcalg_skeleton(X=dataframe.values, knowledge=((results['p_matrix'] < pc_alpha) + 0),
+            #                                  sig_level=pc_alpha_contemp,
+            #                                  pmax=100,
+            #                                  qmax=100,
+            #                                  ci_test='par_corr',
+            #                                  verbosity=0)
 
-            return_dict = {'graph': pc_results['graph'],
-                           'sepset': pc_results['sepset']}
+            return_dict = {'graph': results['graph'],
+                           'sepset': results['sepset']}
 
         else:
             # Get the results from run_mci, using the parents as the input
@@ -2180,7 +2182,9 @@ class PCMCI():
                         tau_max=1,
                         parents=None,
                         max_conds_py=None,
-                        max_conds_px=None):
+                        max_conds_px=None,
+                        pc_alpha_contemp=.05,
+                        pc_alpha=.05):
         """MCI conditional independence tests.
 
         Implements the MCI test (Algorithm 2 in [1]_). Returns the matrices of
@@ -2261,10 +2265,23 @@ class PCMCI():
                 self.cond_ind_test._print_cond_ind_results(val,
                                                            pval=pval,
                                                            conf=conf)
+
+        pc_results = self.pcalg_skeleton(X=dataframe.values, knowledge=((p_matrix < pc_alpha) + 0),
+                                                        sig_level=pc_alpha_contemp,
+                                                        pmax=100,
+                                                        qmax=100,
+                                                        ci_test='par_corr',
+                                                        verbosity=0)
+
+        #TODO: Need to decide which parts vars. ought to be returned here.
+        # Note: bad practice to add an extra fn for this trivial addition...
+
+        return {'graph': pc_results['graph'],
+                'sepset': pc_results['sepset']}
         # Return the values as a dictionary
-        return {'val_matrix': val_matrix,
-                'p_matrix': p_matrix,
-                'conf_matrix': conf_matrix}
+        # return {'val_matrix': val_matrix,
+        #         'p_matrix': p_matrix,
+        #         'conf_matrix': conf_matrix}
         return
 
 
@@ -2312,4 +2329,8 @@ if __name__ == '__main__':
     dataframe = pp.DataFrame(np.random.randn(100, 3), )
     pcmci = PCMCI(dataframe, ParCorr())
 
-    pcmci.get_corrected_pvalues(np.random.rand(2, 2, 2))
+    test_result = pcmci.run_pcmci(test_contemp=True, pc_alpha_contemp=.05, pc_alpha=.05)
+
+    test_result
+
+    # pcmci.get_corrected_pvalues(np.random.rand(2, 2, 2))
