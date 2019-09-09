@@ -1469,9 +1469,6 @@ class PCMCI():
 
 
 
-            ## TODO: Modify runpcmci so that it has a flag to run  runcontempmci.
-    ## TODO: Should try modifying this one, as it doesn't seem to be used,
-    ## and could perhaps easily take outputed time series graph as input?
     def pcalg_skeleton(self, X, knowledge, sig_level=0.1, pmax=100, qmax=100,
                        ci_test='par_corr',
                        verbosity=0):
@@ -2117,7 +2114,7 @@ class PCMCI():
                                          pc_alpha=pc_alpha,
                                          max_conds_dim=max_conds_dim,
                                          max_combinations=max_combinations)
-        if test_contemp:
+        if test_contemp: # Runs PC on mci outputed graph, then returns graph and sepsets.
             results = self.run_contemp_mci(selected_links=selected_links,
                                            tau_min=tau_min,
                                            tau_max=tau_max,
@@ -2126,15 +2123,6 @@ class PCMCI():
                                            max_conds_px=max_conds_px,
                                            pc_alpha=pc_alpha,
                                            pc_alpha_contemp=pc_alpha_contemp)
-
-            print(self.dataframe)
-            ## TODO: Need to pass knowledge (adj.mat) here. ALso data, -- change to use functional style instead of OO.
-            # pc_results = self.pcalg_skeleton(X=dataframe.values, knowledge=((results['p_matrix'] < pc_alpha) + 0),
-            #                                  sig_level=pc_alpha_contemp,
-            #                                  pmax=100,
-            #                                  qmax=100,
-            #                                  ci_test='par_corr',
-            #                                  verbosity=0)
 
             return_dict = {'graph': results['graph'],
                            'sepset': results['sepset']}
@@ -2175,7 +2163,6 @@ class PCMCI():
         return return_dict
 
 
-    ## TODO: should alter (or add as flag/call-in?) run_mci (copied here) so that it runs on contemp. effects.
     def run_contemp_mci(self,
                         selected_links=None,
                         tau_min=0,
@@ -2273,8 +2260,8 @@ class PCMCI():
                                                         ci_test='par_corr',
                                                         verbosity=0)
 
-        #TODO: Need to decide which parts vars. ought to be returned here.
-        # Note: bad practice to add an extra fn for this trivial addition...
+        # Note: bad practice to add an extra fn for mci. Only a few lines change vs regular mci. Should
+        # look into better design in future.
 
         return {'graph': pc_results['graph'],
                 'sepset': pc_results['sepset']}
@@ -2326,11 +2313,17 @@ if __name__ == '__main__':
     from tigramite.independence_tests import ParCorr
     import tigramite.data_processing as pp
 
+# In this case the vars should all be indep. of one another.
     dataframe = pp.DataFrame(np.random.randn(100, 3), )
     pcmci = PCMCI(dataframe, ParCorr())
 
     test_result = pcmci.run_pcmci(test_contemp=True, pc_alpha_contemp=.05, pc_alpha=.05)
 
     test_result
+
+
+
+
+
 
     # pcmci.get_corrected_pvalues(np.random.rand(2, 2, 2))
