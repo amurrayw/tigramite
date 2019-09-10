@@ -1564,6 +1564,122 @@ class PCMCI():
         return {'graph': graph,
                 'sepset': sepset}
 
+    def pcalg_rules(graph, sepset, verbosity=0):
+
+        N = graph.shape[0]
+
+        # adj = get_adj(graph)
+
+        def rule1(graph):
+            # Find triples i --> k -- j with i -/- j
+            adj = graph.get_adj(graph)
+            triples = []
+            for k in range(N):
+                for i in adj[k]:
+                    if k not in adj[i]:
+                        for j in adj[k]:
+                            if k in adj[j]:
+                                if graph[i, j] == 0 and graph[j, i] == 0:
+                                    triples.append((i, k, j))
+
+            # orient as i --> k --> j
+            for ikj in triples:
+                i, k, j = ikj
+                graph[j, k] = 0
+
+            return len(triples) > 0, graph
+
+        def rule2(graph):
+            # Find triples i --> k --> j with i -- j
+            adj = graph.get_adj(graph)
+            triples = []
+            for j in range(N):
+                for k in adj[j]:
+                    if j not in adj[k]:
+                        for i in adj[k]:
+                            if k not in adj[i]:
+                                if graph[i, j] == 1 and graph[j, i] == 1:
+                                    triples.append((i, k, j))
+
+            # orient as i --> j
+            for ikj in triples:
+                i, k, j = ikj
+                graph[j, i] = 0
+
+            return len(triples) > 0, graph
+
+        def rule3(graph):
+            # Find chains i -- k --> j and  i -- l --> j with i -- j
+            # and k -/- l
+            adj = graph.get_adj(graph)
+            pairs = []
+            for j in range(N):
+                for i in adj[j]:
+                    if graph[j, i] == 1:
+                        for k in adj[j]:
+                            for l in adj[j]:
+                                if (k != l and k != i and l != i and j not in adj[k] and j not in adj[l]
+                                        and graph[k, l] == 0 and graph[l, k] == 0):
+                                    if i in adj[l] and i in adj[k]:
+                                        if graph[k, i] == 1 and graph[l, i] == 1:
+                                            pairs.append((i, j))
+
+            # orient as i --> j
+            for ij in pairs:
+                # print ij
+                i, j = ij
+                graph[j, i] = 0
+
+            return len(pairs) > 0, graph
+
+        graph_new = np.copy(graph)
+        any1 = any2 = any3 = True
+        while (any1 or any2 or any3):
+            any1, graph_new = rule1(graph_new)
+            any2, graph_new = rule2(graph_new)
+            any3, graph_new = rule3(graph_new)
+
+        if verbosity > 0:
+            print("Updated graph")
+            print(graph_new)
+
+        return {'graph': graph_new,
+                'sepset': sepset}
+
+    def pcalg_colliders(graph, sepset, verbosity=0):
+
+        N = graph.shape[0]
+
+        # Check symmetry
+        if not np.all(graph == graph.transpose()):
+            raise ValueError("Graph not symmetric")
+
+        adj = graph.get_adj(graph)
+
+        # Find unshielded triples
+        triples = []
+        for i in range(N):
+            for k in adj[i]:
+                for j in adj[k]:
+                    if j > i and i != k and k != j:
+                        if graph[i, j] == 0 and graph[j, i] == 0:
+                            triples.append((i, k, j))
+
+        for ikj in triples:
+            i, k, j = ikj
+            # print "triples ", ikj, sepset[(i,j)]
+            if k not in sepset[(i, j)]:
+                # print 'not in sep'
+                graph[k, i] = 0
+                graph[k, j] = 0
+
+        if verbosity > 0:
+            print("Updated graph")
+            print(graph)
+
+        return {'graph': graph,
+                'sepset': sepset}
+
         #     def pcalg_skeleton_timeseries(self, X, knowledge, sig_level=0.1,
         #                                   tau_min=0, tau_max=1,
         #                                   pmax=100, qmax=100,
@@ -2314,12 +2430,21 @@ class PCMCI():
                                                            pval=pval,
                                                            conf=conf)
 
-        pc_results = self.pcalg_skeleton(X=dataframe.values, knowledge=((p_matrix < pc_alpha) + 0),
+        pc_skeleton = self.pcalg_skeleton(X=dataframe.values, knowledge=((p_matrix < pc_alpha) + 0),
                                          sig_level=pc_alpha_contemp,
                                          pmax=100,
                                          qmax=100,
                                          ci_test='par_corr',
                                          verbosity=0)
+
+        skeleton = pc_skeleton['graph']
+        sepset = pc_skeleton['sepset']
+
+        collider_results = self.pcalg_colliders(skeleton, sepset)
+
+        skeleton_colliders = collider_results['graph']
+
+        pc_results = self.pcalg_rules(skeleton_colliders, sepset)
 
         # Note: bad practice to add an extra fn for mci. Only a few lines change vs regular mci. Should
         # look into better design in future.
