@@ -1483,10 +1483,10 @@ class PCMCI():
         #   graph[range(N),range(N)] = 0
 
         def build_adj_mat(time_graph, add_contemp=True, plot=False):
-            print(time_graph)
-            print(type(time_graph))
+            # print(time_graph)
+            # print(type(time_graph))
             dimensions = np.empty(0, dtype=int)
-            # print("HERE")
+            print("HERE")
             # print(dimensions.shape)
             # Getting n.dimensions in time graph.
             for i in time_graph.shape:
@@ -1524,17 +1524,21 @@ class PCMCI():
         ## Use prior knowledge as the starting graph.
         graph = build_adj_mat(time_graph=knowledge, add_contemp=True, plot=False)
         graph = nx.adjacency_matrix(graph, nodelist=sorted(graph.nodes())).todense()
+
+        print("graph -- post build")
+        print(graph)
         # Define adj
         adj = self.get_adj(graph)
-
+        print("adj -- post build, using jakob's code")
         print(adj)
+        # print(adj)
 
-        print("graph")
-        print(graph)
-        print("graph.shape")
-        print(graph.shape)
-        print("zip(*np.where(graph))")
-        print(zip(*np.where(graph)))
+        # print("graph")
+        # print(graph)
+        # print("graph.shape")
+        # print(graph.shape)
+        # print("zip(*np.where(graph))")
+        # print(zip(*np.where(graph)))
 
         # Define sepset
         sepset = dict([((i, j), []) for i in range(N) for j in range(N)])
@@ -1610,6 +1614,8 @@ class PCMCI():
                                 {0: '<= %s: dep' % sig_level, 1: '> %s: indep' % sig_level}[pval > sig_level],
                                 {False: '[recycled]', True: ''}[type(check) == bool]))
                         if pval > sig_level:
+                            print("pval")
+                            print(pval) # TODO: problem is somewhere near here. vars only seem related to themselves. -- perhaps variable order is different in adj.mat and dataset?
                             graph[i, j] = graph[j, i] = 0
                             sepset[(i, j)] = sepset[(j, i)] = list(S)
                             break
@@ -1626,6 +1632,8 @@ class PCMCI():
 
             # Re-compute adj
             adj = self.get_adj(graph)
+            print("adj -- new adjacencyies after indep tests")
+            print(adj)
             # dict([(j, list(np.where(graph[:,j] != 0)[0])) for j in range(N)])
             # print "updated ", adj
         return {'graph': graph,
@@ -1766,8 +1774,8 @@ class PCMCI():
         # for z in range(0, graph.shape[2]):
         #     graph[:,:,z][np.where(graph[:,:,z]==0)]=-1 ## Failed attempt1.
 
-        print(graph.shape)
-        print(np.ones((N, N, tau_max + 1), dtype='int').shape)
+        # print(graph.shape)
+        # print(np.ones((N, N, tau_max + 1), dtype='int').shape)
         # Define adj
         adjt = self.get_adj_time_series(graph)
         # print adjt
@@ -2160,7 +2168,7 @@ class PCMCI():
 
         data=data.dropna().values ## TODO: Need to make sure drop NA is only deleting rows where the two vars
         ## being considered are missing data, rather than all of the vars.
-        print(data.shape)
+        # print(data.shape)
         if len(S) > 0:
             z = data[:, S]
         else:
@@ -2220,6 +2228,10 @@ class PCMCI():
             value = cond_ind_test.get_dependence_measure(array, xyz)
             pval = cond_ind_test.get_shuffle_significance(array, xyz, value)
 
+        # print("pval")
+        # print(pval)
+        # print("value")
+        # print(value)
         return pval, value
 
     def CI_timeseries(self, data, i, abstau, j, S, test='par_corr'):
@@ -2465,6 +2477,9 @@ class PCMCI():
                                                            pval=pval,
                                                            conf=conf)
 
+        print("((p_matrix < pc_alpha) + 0)")
+        print(((p_matrix < pc_alpha) + 0))
+
         pc_skeleton = self.pcalg_skeleton(X=dataframe.values, knowledge=((p_matrix < pc_alpha) + 0),
                                           tau_max=tau_max,
                                          sig_level=pc_alpha_contemp,
@@ -2475,12 +2490,16 @@ class PCMCI():
 
         skeleton = pc_skeleton['graph']
         sepset = pc_skeleton['sepset']
-
+        print("skeleton")
+        print(skeleton)
         collider_results = self.pcalg_colliders(skeleton, sepset)
 
         skeleton_colliders = collider_results['graph']
-
+        print("skeleton_colliders")
+        print(skeleton_colliders)
         pc_results = self.pcalg_rules(skeleton_colliders, sepset)
+        print("pc_results['graph']")
+        print(pc_results['graph'])
 
         # Note: bad practice to add an extra fn for mci. Only a few lines change vs regular mci. Should
         # look into better design in future.
