@@ -1473,14 +1473,53 @@ class PCMCI():
 
     #
     #
-    def pcalg_skeleton(self, X, knowledge, sig_level=0.1, pmax=100, qmax=100,
+    def pcalg_skeleton(self, X, knowledge, tau_max, sig_level=0.1, pmax=100, qmax=100,
                        ci_test='par_corr',
-                       verbosity=0):
+                       verbosity=0, ):
         N = X.shape[1]
 
         # Form complete graph
         #    graph = np.ones((N, N), dtype='int')
         #   graph[range(N),range(N)] = 0
+
+        def build_adj_mat(time_graph, add_contemp=True, plot=False):
+            print(time_graph)
+            print(type(time_graph))
+            dimensions = np.empty(0, dtype=int)
+            # print("HERE")
+            # print(dimensions.shape)
+            # Getting n.dimensions in time graph.
+            for i in time_graph.shape:
+                dimensions = np.append(dimensions, i)
+
+            G = nx.Graph()  # creating empty graph.
+
+            # creating empty matrix
+            # adj_mat=np.zeros((np.sum(dimensions[0]), np.sum(dimensions)))
+            # adding time series edges.
+            for z in range(0, dimensions[1]):
+                for i in range(0, dimensions[0]):
+                    # print("X*_0")
+                    G.add_node("X" + str(i) + "_" + str(0))
+                    for j in range(0, dimensions[dimensions.size - 1]):
+                        G.add_node("X" + str(i) + "_" + str(j))
+                        # print("X*_*")
+                        # print("X"+str(i) + "_" +str(j))
+                        if time_graph[i, z, j] == 1:
+                            G.add_edge(("X" + str(i) + "_" + str(0)), ("X" + str(i) + "_" + str(j)))
+            # Now Need to add in simultaneous edges ("1" for all vars on same time step...)
+            if add_contemp:
+                time_lag = dimensions[dimensions.size - 1]
+                n_vars = dimensions[0]
+                for lag_degree in range(0, time_lag):
+                    for node1 in G.nodes:
+                        for node2 in G.nodes:
+                            if ((str("_") + str(lag_degree)) in node1 and (str("_") + str(lag_degree)) in node2):
+                                G.add_edge(node1, node2)
+            if plot:
+                nx.draw_networkx(G)  # plotting for testing purposes.
+            return G
+
 
         ## Use prior knowledge as the starting graph.
         graph = build_adj_mat(time_graph=knowledge, add_contemp=True, plot=False)
@@ -1500,10 +1539,6 @@ class PCMCI():
         # Define sepset
         sepset = dict([((i, j), []) for i in range(N) for j in range(N)])
 
-        # TODO: Fix bug where:
-        #  File "<input>", line 1533, in pcalg_skeleton
-        #  File "<input>", line 2014, in CI
-        #  IndexError: index 3 is out of bounds for axis 1 with size 3
 
         p = 0
         # print [len(adj[j]) for j in range(N)]
@@ -1535,6 +1570,38 @@ class PCMCI():
                         if type(check) != bool:
                             pval = check
                         else:
+                            # print(list(zip(*np.where(graph))))
+                            # print("X")
+                            # print(X)
+                            # print("X.shape") ##
+                            # print(X.shape)
+                            # print("i")
+                            # print(i)
+                            # print("j")
+                            # print(j)
+                            # print("S")
+                            # print(S)
+                            # print("ci_test")
+                            # print(ci_test)
+
+                            ### From time series version. Needs to modify data so that the test can procede (with i, j possibly greater than n.orig.vars, need to add lagged vars to dataset.)
+
+                            # var_names = sorted(graph.nodes())
+
+                            # TODO: probably should move these lines to another part so they aren't called so often.
+                            lagged_data = list()
+                            lagged_data.append(pd.DataFrame(self.dataframe.values))
+                            for lag in range(1, tau_max+1):
+                                lagged_data.append(pd.DataFrame(dataframe.values[range(lag, dataframe.values.shape[0])]))
+
+                            X=pd.concat(lagged_data, axis=1, ignore_index=True)
+                            # print(X.shape)
+
+
+
+
+                            ###
+
                             pval = self.CI(X, i, j, S, ci_test)[0]
 
                         if verbosity > 0:
@@ -1680,100 +1747,100 @@ class PCMCI():
         return {'graph': graph,
                 'sepset': sepset}
 
-        #     def pcalg_skeleton_timeseries(self, X, knowledge, sig_level=0.1,
-        #                                   tau_min=0, tau_max=1,
-        #                                   pmax=100, qmax=100,
-        #                                   ci_test='par_corr',
-        #                                   verbosity=0):
-        #         N = X.shape[1]
-        #
-        #         # Form complete graph
-        #         #graph =
-        #         #graph[range(N), range(N), 0] = 0
-        #
-        #         graph = knowledge
-        #
-        # # TODO: Need to add effects for contemporary variables, but unclear how he stores this in his representation...
-        # # TODO: Ask Jakob for some test cases -- unclear how to tell if results are correct at this stage (since things run).
-        #         # Make complete graph for contemp. variables, then zero main diagonal.
-        #         # for z in range(0, graph.shape[2]):
-        #         #     graph[:,:,z][np.where(graph[:,:,z]==0)]=-1 ## Failed attempt1.
-        #
-        #         print(graph.shape)
-        #         print(np.ones((N, N, tau_max + 1), dtype='int').shape)
-        #         # Define adj
-        #         adjt = self.get_adj_time_series(graph)
-        #         # print adjt
-        #         # Define sepset
-        #         sepset = dict([(((i, -tau), j), []) for tau in range(tau_max + 1) for i in range(N) for j in range(N)])
-        #
-        #         if verbosity > 0:
-        #             print("\n--------------------------")
-        #             print("Skeleton discovery phase")
-        #             print("--------------------------")
-        #
-        #         p = 0
-        #         # print [len(adj[j]) for j in range(N)]
-        #         # if verbosity > 0:
-        #         #     print (graph)
-        #
-        #         while (np.any([len(adjt[j]) - 1 >= p for j in range(N)]) and p <= pmax):
-        #             if verbosity > 0:
-        #                 print("\n:::::::::::::::::::::::: p = %d" % p)
-        #
-        #             # Store already computed CI test results
-        #             ci_results = {}
-        #             for (i, j, abstau) in zip(*np.where(graph)):
-        #                 if graph[i, j, abstau] != 0 and len(adjt[j]) - 1 >= p:
-        #                     if verbosity > 0:
-        #                         print("\n\t(%d, %d) o--o %d" % (i, -abstau, j))
-        #
-        #                     conditions = list(itertools.combinations([(k, tauk) for (k, tauk) in adjt[j]
-        #                                                               if not (k == i and tauk == -abstau)], p))
-        #                     if verbosity > 0:
-        #                         print("\tIterate through conditions %s" % conditions)
-        #
-        #                     for q, S in enumerate(conditions):
-        #                         if q > qmax:
-        #                             break
-        #
-        #                         check = self.is_in_set_timeseries(i, abstau, j, S, ci_results)
-        #                         if type(check) != bool:
-        #                             pval = check
-        #                         else:
-        #                             pval = self.CI_timeseries(X, i, abstau, j, S, ci_test)[0]
-        #
-        #                         if verbosity > 0:
-        #                             print("\t\t(%d, %d) _|_ %d | %s : pval=%.4f %s  %s" % (i, -abstau, j, S, pval,
-        #                                                                                    {0: '<= %s: dep' % sig_level,
-        #                                                                                     1: '> %s: indep' % sig_level}[
-        #                                                                                        pval > sig_level],
-        #                                                                                    {False: '[recycled]', True: ''}[
-        #                                                                                        type(check) == bool]))
-        #                         if pval > sig_level:
-        #                             if abstau == 0:
-        #                                 graph[i, j, 0] = graph[j, i, 0] = 0
-        #                                 sepset[((i, 0), j)] = sepset[((j, 0), i)] = list(S)
-        #                             else:
-        #                                 graph[i, j, abstau] = 0
-        #                                 sepset[((i, -abstau), j)] = list(S)
-        #                             break
-        #                         else:
-        #                             ci_results[(((i, -abstau), j), S)] = pval
-        #
-        #             # Increase condition cardinality
-        #             p += 1
-        #
-        #             # Re-compute adj
-        #             adjt = self.get_adj_time_series(graph)
-        #             # dict([(j, list(np.where(graph[:,j] != 0)[0])) for j in range(N)])
-        #             # print "updated ", adjt
-        #             if verbosity > 0:
-        #                 print("\nUpdated adjacencies")
-        #                 print(adjt)
-        #
-        #         return {'graph': graph,
-        #                 'sepset': sepset}
+    def pcalg_skeleton_timeseries(self, X, knowledge, sig_level=0.1,
+                                  tau_min=0, tau_max=1,
+                                  pmax=100, qmax=100,
+                                  ci_test='par_corr',
+                                  verbosity=0):
+        N = X.shape[1]
+
+        # Form complete graph
+        #graph =
+        #graph[range(N), range(N), 0] = 0
+
+        graph = knowledge
+
+        # TODO: Need to add effects for contemporary variables, but unclear how he stores this in his representation...
+        # TODO: Ask Jakob for some test cases -- unclear how to tell if results are correct at this stage (since things run).
+        # Make complete graph for contemp. variables, then zero main diagonal.
+        # for z in range(0, graph.shape[2]):
+        #     graph[:,:,z][np.where(graph[:,:,z]==0)]=-1 ## Failed attempt1.
+
+        print(graph.shape)
+        print(np.ones((N, N, tau_max + 1), dtype='int').shape)
+        # Define adj
+        adjt = self.get_adj_time_series(graph)
+        # print adjt
+        # Define sepset
+        sepset = dict([(((i, -tau), j), []) for tau in range(tau_max + 1) for i in range(N) for j in range(N)])
+
+        if verbosity > 0:
+            print("\n--------------------------")
+            print("Skeleton discovery phase")
+            print("--------------------------")
+
+        p = 0
+        # print [len(adj[j]) for j in range(N)]
+        # if verbosity > 0:
+        #     print (graph)
+
+        while (np.any([len(adjt[j]) - 1 >= p for j in range(N)]) and p <= pmax):
+            if verbosity > 0:
+                print("\n:::::::::::::::::::::::: p = %d" % p)
+
+            # Store already computed CI test results
+            ci_results = {}
+            for (i, j, abstau) in zip(*np.where(graph)):
+                if graph[i, j, abstau] != 0 and len(adjt[j]) - 1 >= p:
+                    if verbosity > 0:
+                        print("\n\t(%d, %d) o--o %d" % (i, -abstau, j))
+
+                    conditions = list(itertools.combinations([(k, tauk) for (k, tauk) in adjt[j]
+                                                              if not (k == i and tauk == -abstau)], p))
+                    if verbosity > 0:
+                        print("\tIterate through conditions %s" % conditions)
+
+                    for q, S in enumerate(conditions):
+                        if q > qmax:
+                            break
+
+                        check = self.is_in_set_timeseries(i, abstau, j, S, ci_results)
+                        if type(check) != bool:
+                            pval = check
+                        else:
+                            pval = self.CI_timeseries(X, i, abstau, j, S, ci_test)[0]
+
+                        if verbosity > 0:
+                            print("\t\t(%d, %d) _|_ %d | %s : pval=%.4f %s  %s" % (i, -abstau, j, S, pval,
+                                                                                   {0: '<= %s: dep' % sig_level,
+                                                                                    1: '> %s: indep' % sig_level}[
+                                                                                       pval > sig_level],
+                                                                                   {False: '[recycled]', True: ''}[
+                                                                                       type(check) == bool]))
+                        if pval > sig_level:
+                            if abstau == 0:
+                                graph[i, j, 0] = graph[j, i, 0] = 0
+                                sepset[((i, 0), j)] = sepset[((j, 0), i)] = list(S)
+                            else:
+                                graph[i, j, abstau] = 0
+                                sepset[((i, -abstau), j)] = list(S)
+                            break
+                        else:
+                            ci_results[(((i, -abstau), j), S)] = pval
+
+            # Increase condition cardinality
+            p += 1
+
+            # Re-compute adj
+            adjt = self.get_adj_time_series(graph)
+            # dict([(j, list(np.where(graph[:,j] != 0)[0])) for j in range(N)])
+            # print "updated ", adjt
+            if verbosity > 0:
+                print("\nUpdated adjacencies")
+                print(adjt)
+
+        return {'graph': graph,
+                'sepset': sepset}
 
     def get_adj(self, graph):
         N = len(graph)
@@ -1787,43 +1854,7 @@ class PCMCI():
             adjt[j] = list(zip(*(where[0], -where[1])))
 
         return adjt
-    def build_adj_mat(time_graph, add_contemp=True, plot=False):
-        print(time_graph)
-        print(type(time_graph))
-        dimensions = np.empty(0, dtype=int)
-        # print("HERE")
-        # print(dimensions.shape)
-        # Getting n.dimensions in time graph.
-        for i in time_graph.shape:
-            dimensions = np.append(dimensions, i)
 
-        G = nx.Graph()  # creating empty graph.
-
-        # creating empty matrix
-        # adj_mat=np.zeros((np.sum(dimensions[0]), np.sum(dimensions)))
-        # adding time series edges.
-        for z in range(0, dimensions[1]):
-            for i in range(0, dimensions[0]):
-                # print("X*_0")
-                G.add_node("X" + str(i) + "_" + str(0))
-                for j in range(0, dimensions[dimensions.size - 1]):
-                    G.add_node("X" + str(i) + "_" + str(j))
-                    # print("X*_*")
-                    # print("X"+str(i) + "_" +str(j))
-                    if time_graph[i, z, j] == 1:
-                        G.add_edge(("X" + str(i) + "_" + str(0)), ("X" + str(i) + "_" + str(j)))
-        # Now Need to add in simultanious edges ("1" for all vars on same time step...)
-        if add_contemp:
-            time_lag = dimensions[dimensions.size - 1]
-            n_vars = dimensions[0]
-            for lag_degree in range(0, time_lag):
-                for node1 in G.nodes:
-                    for node2 in G.nodes:
-                        if ((str("_") + str(lag_degree)) in node1 and (str("_") + str(lag_degree)) in node2):
-                            G.add_edge(node1, node2)
-        if plot:
-            nx.draw_networkx(G)  # plotting for testing purposes.
-        return G
 
     # zxcv=build_adj_mat(results_3['graph'], add_contemp=False)
     # print(nx.adjacency_matrix(zxcv, nodelist=sorted(zxcv.nodes())).todense()) # prints out adj.mat
@@ -1982,9 +2013,9 @@ class PCMCI():
         graph_new = np.copy(graph)
         any1 = any2 = any3 = True
         while (any1 or any2 or any3):
-            any1, graph_new = rule1(graph_new)
-            any2, graph_new = rule2(graph_new)
-            any3, graph_new = rule3(graph_new)
+            any1, graph_new = rule1(self, graph=graph_new)
+            any2, graph_new = rule2(self, graph=graph_new)
+            any3, graph_new = rule3(self, graph=graph_new)
 
         if verbosity > 0:
             print("Updated graph")
@@ -2126,6 +2157,10 @@ class PCMCI():
         return False
 
     def CI(self, data, i, j, S, test='par_corr'):
+
+        data=data.dropna().values ## TODO: Need to make sure drop NA is only deleting rows where the two vars
+        ## being considered are missing data, rather than all of the vars.
+        print(data.shape)
         if len(S) > 0:
             z = data[:, S]
         else:
@@ -2431,6 +2466,7 @@ class PCMCI():
                                                            conf=conf)
 
         pc_skeleton = self.pcalg_skeleton(X=dataframe.values, knowledge=((p_matrix < pc_alpha) + 0),
+                                          tau_max=tau_max,
                                          sig_level=pc_alpha_contemp,
                                          pmax=100,
                                          qmax=100,
