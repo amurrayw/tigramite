@@ -1486,7 +1486,7 @@ class PCMCI():
             # print(time_graph)
             # print(type(time_graph))
             dimensions = np.empty(0, dtype=int)
-            print("HERE")
+            # print("HERE")
             # print(dimensions.shape)
             # Getting n.dimensions in time graph.
             for i in time_graph.shape:
@@ -1523,14 +1523,17 @@ class PCMCI():
 
         ## Use prior knowledge as the starting graph.
         graph = build_adj_mat(time_graph=knowledge, add_contemp=True, plot=False)
-        graph = nx.adjacency_matrix(graph, nodelist=sorted(graph.nodes())).todense()
+        graph = nx.adjacency_matrix(graph, nodelist=sorted(graph.nodes())).todense() #adj.mat
 
-        print("graph -- post build")
-        print(graph)
+        ## Deleting main diagonal (no self loops).
+        np.fill_diagonal(graph, 0)
+
+        # print("graph -- post build")
+        # print(graph)
         # Define adj
         adj = self.get_adj(graph)
-        print("adj -- post build, using jakob's code")
-        print(adj)
+        # print("adj -- post build, using jakob's code")
+        # print(adj)
         # print(adj)
 
         # print("graph")
@@ -1548,7 +1551,7 @@ class PCMCI():
         # print [len(adj[j]) for j in range(N)]
         if verbosity > 0:
             print(graph)
-        print("HERE")
+
         while (np.any([len(adj[j]) - 1 >= p for j in range(N)]) and p <= pmax):
             if verbosity > 0:
                 print("\n:::::::::::::::::::::::: p = %d" % p)
@@ -1614,12 +1617,14 @@ class PCMCI():
                                 {0: '<= %s: dep' % sig_level, 1: '> %s: indep' % sig_level}[pval > sig_level],
                                 {False: '[recycled]', True: ''}[type(check) == bool]))
                         if pval > sig_level:
-                            print("pval")
-                            print(pval) # TODO: problem is somewhere near here. vars only seem related to themselves. -- perhaps variable order is different in adj.mat and dataset?
+                            # print("pval")
+                            # print(pval) #
                             graph[i, j] = graph[j, i] = 0
-                            sepset[(i, j)] = sepset[(j, i)] = list(S)
+                            sepset[(i, j)] = sepset[(j, i)] = list(S) # TODO: Is this construction correct?
                             break
                         else:
+                            # print("pval -- signif")
+                            # print(pval) # Sometimes seem to get nan instead of pvalue. Not sure why...
                             ci_results[((i, j), S)] = pval
 
             if verbosity > 0:
@@ -1629,11 +1634,12 @@ class PCMCI():
 
             # Increase condition cardinality
             p += 1
-
+            # print("ci_results")
+            # print(ci_results)
             # Re-compute adj
             adj = self.get_adj(graph)
-            print("adj -- new adjacencyies after indep tests")
-            print(adj)
+            # print("adj -- new adjacencyies after indep tests")  # TODO: Completely changes to something wrong here. Need to figure out where it gets the update info.
+            # print(adj)
             # dict([(j, list(np.where(graph[:,j] != 0)[0])) for j in range(N)])
             # print "updated ", adj
         return {'graph': graph,
@@ -1721,7 +1727,7 @@ class PCMCI():
         return {'graph': graph_new,
                 'sepset': sepset}
 
-    def pcalg_colliders(graph, sepset, verbosity=0):
+    def pcalg_colliders(self, graph, sepset, verbosity=0):
 
         N = graph.shape[0]
 
@@ -1729,7 +1735,7 @@ class PCMCI():
         if not np.all(graph == graph.transpose()):
             raise ValueError("Graph not symmetric")
 
-        adj = graph.get_adj(graph)
+        adj = pcmci.get_adj(graph)
 
         # Find unshielded triples
         triples = []
@@ -1743,7 +1749,7 @@ class PCMCI():
         for ikj in triples:
             i, k, j = ikj
             # print "triples ", ikj, sepset[(i,j)]
-            if k not in sepset[(i, j)]:
+            if (k in sepset.keys()) and (k not in sepset[(i, j)]): ## TODO: Need to make sure change is correct (I added k in sepset.keys()). Fixes error where triple isn't in sepset.
                 # print 'not in sep'
                 graph[k, i] = 0
                 graph[k, j] = 0
@@ -1875,38 +1881,50 @@ class PCMCI():
 
         return adjt
 
-    def pcalg_colliders(self, graph, sepset, verbosity=0):
-        N = graph.shape[0]
-
-        # Check symmetry
-        if not np.all(graph == graph.transpose()):
-            raise ValueError("Graph not symmetric")
-
-        adj = self.get_adj(graph)
-
-        # Find unshielded triples
-        triples = []
-        for i in range(N):
-            for k in adj[i]:
-                for j in adj[k]:
-                    if j > i and i != k and k != j:
-                        if graph[i, j] == 0 and graph[j, i] == 0:
-                            triples.append((i, k, j))
-
-        for ikj in triples:
-            i, k, j = ikj
-            # print "triples ", ikj, sepset[(i,j)]
-            if k not in sepset[(i, j)]:
-                # print 'not in sep'
-                graph[k, i] = 0
-                graph[k, j] = 0
-
-        if verbosity > 0:
-            print("Updated graph")
-            print(graph)
-
-        return {'graph': graph,
-                'sepset': sepset}
+    # def pcalg_colliders(self, graph, sepset, verbosity=0):
+    #     N = graph.shape[0]
+    #
+    #     # Check symmetry
+    #     if not np.all(graph == graph.transpose()):
+    #         raise ValueError("Graph not symmetric")
+    #
+    #     adj = self.get_adj(graph)
+    #
+    #     print("adj -- colliders")
+    #     print(adj)
+    #     # Find unshielded triples
+    #     triples = []
+    #     for i in range(N):
+    #         for k in adj[i]:
+    #             for j in adj[k]:
+    #                 if j > i and i != k and k != j:
+    #                     if graph[i, j] == 0 and graph[j, i] == 0:
+    #                         triples.append((i, k, j))
+    #
+    #     for ikj in triples:
+    #         print("sepset")
+    #         print(sepset)
+    #         print("triples")
+    #         print(triples)
+    #         i, k, j = ikj
+    #         print("ikj")
+    #         print(ikj)
+    #         print("i")
+    #         print(i)
+    #         print("j")
+    #         print(j)
+    #         print ("triples ", ikj, sepset[(i,j)])
+    #         if k not in sepset[(i, j)]:
+    #             # print 'not in sep'
+    #             graph[k, i] = 0
+    #             graph[k, j] = 0
+    #
+    #     if verbosity > 0:
+    #         print("Updated graph")
+    #         print(graph)
+    #
+    #     return {'graph': graph,
+    #             'sepset': sepset}
 
     def pcalg_colliders_timeseries(self, graph, sepset, verbosity=0):
         N = graph.shape[0]
@@ -2477,8 +2495,8 @@ class PCMCI():
                                                            pval=pval,
                                                            conf=conf)
 
-        print("((p_matrix < pc_alpha) + 0)")
-        print(((p_matrix < pc_alpha) + 0))
+        # print("((p_matrix < pc_alpha) + 0)")
+        # print(((p_matrix < pc_alpha) + 0))
 
         pc_skeleton = self.pcalg_skeleton(X=dataframe.values, knowledge=((p_matrix < pc_alpha) + 0),
                                           tau_max=tau_max,
@@ -2490,16 +2508,16 @@ class PCMCI():
 
         skeleton = pc_skeleton['graph']
         sepset = pc_skeleton['sepset']
-        print("skeleton")
-        print(skeleton)
-        collider_results = self.pcalg_colliders(skeleton, sepset)
+        # print("skeleton")
+        # print(skeleton)
+        collider_results = self.pcalg_colliders(graph=skeleton, sepset=sepset)
 
         skeleton_colliders = collider_results['graph']
-        print("skeleton_colliders")
-        print(skeleton_colliders)
+        # print("skeleton_colliders")
+        # print(skeleton_colliders)
         pc_results = self.pcalg_rules(skeleton_colliders, sepset)
-        print("pc_results['graph']")
-        print(pc_results['graph'])
+        # print("pc_results['graph']")
+        # print(pc_results['graph'])
 
         # Note: bad practice to add an extra fn for mci. Only a few lines change vs regular mci. Should
         # look into better design in future.
