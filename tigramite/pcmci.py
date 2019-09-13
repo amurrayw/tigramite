@@ -1599,7 +1599,7 @@ class PCMCI():
                             lagged_data = list()
                             lagged_data.append(pd.DataFrame(self.dataframe.values))
                             for lag in range(1, tau_max+1):
-                                lagged_data.append(pd.DataFrame(dataframe.values[range(lag, dataframe.values.shape[0])]))
+                                lagged_data.append(pd.DataFrame(self.dataframe.values[range(lag, self.dataframe.values.shape[0])]))
 
                             X=pd.concat(lagged_data, axis=1, ignore_index=True)
                             # print(X.shape)
@@ -2519,6 +2519,18 @@ class PCMCI():
         # print("pc_results['graph']")
         # print(pc_results['graph'])
 
+        ## TODO: need to make sure edges from non-simultanious state weren't lost. (Or do we? since it is possible the path between time steps is only via contemp?)
+        # time_series_knowledge = build_adj_matrix((p_matrix < pc_alpha) + 0) ## Need to make sure can use adj.mat builder here.
+        #
+        # for i in range(0, time_series_knowledge.shape[0]):
+        #     for j in range(0, time_series_knowledge.shape[0]):
+        #         if time_series_knowledge[i,j]==1:
+        #             pc_results['graph'][i,j]=1
+
+
+
+
+
         # Note: bad practice to add an extra fn for mci. Only a few lines change vs regular mci. Should
         # look into better design in future.
 
@@ -2530,40 +2542,40 @@ class PCMCI():
         #         'conf_matrix': conf_matrix}
         return
 
-        def print_results(self,
-                          return_dict,
-                          alpha_level=0.05):
-            """Prints significant parents from output of MCI or PCMCI algorithms.
+    def print_results(self,
+                      return_dict,
+                      alpha_level=0.05):
+        """Prints significant parents from output of MCI or PCMCI algorithms.
 
-            Parameters
-            ----------
-            return_dict : dict
-                Dictionary of return values, containing keys
-                    * 'p_matrix'
-                    * 'val_matrix'
-                    * 'conf_matrix'
-                'q_matrix' can also be included in keys, but is not necessary.
+        Parameters
+        ----------
+        return_dict : dict
+            Dictionary of return values, containing keys
+                * 'p_matrix'
+                * 'val_matrix'
+                * 'conf_matrix'
+            'q_matrix' can also be included in keys, but is not necessary.
 
-            alpha_level : float, optional (default: 0.05)
-                Significance level.
-            """
-            # Check if q_matrix is defined.  It is returned for PCMCI but not for
-            # MCI
-            q_matrix = None
-            q_key = 'q_matrix'
-            if q_key in return_dict:
-                q_matrix = return_dict[q_key]
-            # Check if conf_matrix is defined
-            conf_matrix = None
-            conf_key = 'conf_matrix'
-            if conf_key in return_dict:
-                conf_matrix = return_dict[conf_key]
-            # Wrap the already defined function
-            self.print_significant_links(return_dict['p_matrix'],
-                                         return_dict['val_matrix'],
-                                         conf_matrix=conf_matrix,
-                                         q_matrix=q_matrix,
-                                         alpha_level=alpha_level)
+        alpha_level : float, optional (default: 0.05)
+            Significance level.
+        """
+        # Check if q_matrix is defined.  It is returned for PCMCI but not for
+        # MCI
+        q_matrix = None
+        q_key = 'q_matrix'
+        if q_key in return_dict:
+            q_matrix = return_dict[q_key]
+        # Check if conf_matrix is defined
+        conf_matrix = None
+        conf_key = 'conf_matrix'
+        if conf_key in return_dict:
+            conf_matrix = return_dict[conf_key]
+        # Wrap the already defined function
+        self.print_significant_links(return_dict['p_matrix'],
+                                     return_dict['val_matrix'],
+                                     conf_matrix=conf_matrix,
+                                     q_matrix=q_matrix,
+                                     alpha_level=alpha_level)
 
     if __name__ == '__main__':
         from tigramite.independence_tests import ParCorr
@@ -2578,17 +2590,17 @@ class PCMCI():
     #     test_result
 
     # Test case based on online example in documentation. (only checking if runs without error).
-np.random.seed(42)
-links_coeffs = {0: [((0, -1), 0.8)], 1: [((1, -1), 0.8), ((0, -1), 0.5)], 2: [((2, -1), 0.8), ((1, -2), -0.6)]}
-data, _ = pp.var_process(links_coeffs, T=1000)
-dataframe = pp.DataFrame(data)
-cond_ind_test = ParCorr()
-pcmci = PCMCI(dataframe=dataframe, cond_ind_test=cond_ind_test)
+# np.random.seed(42)
+# links_coeffs = {0: [((0, -1), 0.8)], 1: [((1, -1), 0.8), ((0, -1), 0.5)], 2: [((2, -1), 0.8), ((1, -2), -0.6)]}
+# data, _ = pp.var_process(links_coeffs, T=1000)
+# dataframe = pp.DataFrame(data)
+# cond_ind_test = ParCorr()
+# pcmci = PCMCI(dataframe=dataframe, cond_ind_test=cond_ind_test)
 
 # results_0 = pcmci.run_pcmci(tau_max=0, pc_alpha=.05, test_contemp=True)
 # results_1 = pcmci.run_pcmci(tau_max=1, pc_alpha=.05, test_contemp=True)
 # results_2 = pcmci.run_pcmci(tau_max=2, pc_alpha=.05, test_contemp=True)
-results_3 = pcmci.run_pcmci(tau_max=3, pc_alpha=.05, test_contemp=True)
+# results_3 = pcmci.run_pcmci(tau_max=3, pc_alpha=.05, test_contemp=True)
 
     # results_0['graph']
     #
